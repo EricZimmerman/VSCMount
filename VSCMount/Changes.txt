@@ -1,0 +1,5 @@
+﻿
+libz add --libz Other.libz --include *.dll --move
+libz inject-libz -assembly .\VSCMount.exe --libz .\Other.libz --move
+libz instrument --assembly .\VSCMount.exe --libz-resources
+(sign exe)
