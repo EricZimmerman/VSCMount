@@ -118,15 +118,17 @@ namespace VSCMount
                 return;
             }
 
+            _fluentCommandLineParser.Object.DriveLetter = _fluentCommandLineParser.Object.DriveLetter[0].ToString().ToUpperInvariant();
+
             if (DriveInfo.GetDrives()
                     .Any(t => t.RootDirectory.Name.StartsWith(_fluentCommandLineParser.Object.DriveLetter)) ==
                 false)
             {
                 _loggerConsole.Error(
-                    $"\r\n'{_fluentCommandLineParser.Object.DriveLetter}' does is not ready. Exiting\r\n");
+                    $"\r\n'{_fluentCommandLineParser.Object.DriveLetter}' is not ready. Exiting\r\n");
                 return;
             }
-
+            
             if (_fluentCommandLineParser.Object.Debug)
             {
                 foreach (var r in LogManager.Configuration.LoggingRules)
