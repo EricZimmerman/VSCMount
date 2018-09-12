@@ -170,7 +170,6 @@ namespace VSCMount
                     Directory.Delete(vssDir);
                 }
 
-
                 _loggerConsole.Info(
                     $"Mounting VSCs to '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'\r\n");
                 Helpers.MountVss(_fluentCommandLineParser.Object.DriveLetter[0],
