@@ -18,6 +18,10 @@ namespace VSCMount
 
         private static void SetupNLog()
         {
+            if (File.Exists("Nlog.config"))
+            {
+                return;
+            }
             var config = new LoggingConfiguration();
             var logLevel = LogLevel.Info;
 
