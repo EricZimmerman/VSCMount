@@ -158,8 +158,18 @@ namespace VSCMount
             {
                 _loggerConsole.Info(
                     $"Creating directory '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'");
-                Directory.CreateDirectory(
-                    $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}");
+
+                try
+                {
+                    Directory.CreateDirectory(
+                        $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}");
+                }
+                catch (Exception e)
+                {
+                    _loggerConsole.Fatal($"Unable to create directory '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'. Does the drive exist? Exiting\r\n");
+
+                    return;
+                }
             }
 
             try
