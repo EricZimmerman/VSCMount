@@ -19,10 +19,11 @@ namespace VSCMount
 
         private static void SetupNLog()
         {
-            if (File.Exists( Path.Combine(BaseDirectory,"Nlog.config")))
+            if (File.Exists(Path.Combine(BaseDirectory, "Nlog.config")))
             {
                 return;
             }
+
             var config = new LoggingConfiguration();
             var logLevel = LogLevel.Info;
 
@@ -70,7 +71,7 @@ namespace VSCMount
             _fluentCommandLineParser.Setup(arg => arg.UseDatesInNames)
                 .As("ud")
                 .WithDescription(
-                    "Use VSC creation timestamps (yyyyMMddTHHmmss) in symbolic link names. Default is FALSE")
+                    "Use VSC creation timestamps (yyyyMMddTHHmmss.fffffff) in symbolic link names. Default is FALSE")
                 .SetDefault(false);
 
             _fluentCommandLineParser.Setup(arg => arg.Debug)
@@ -123,7 +124,8 @@ namespace VSCMount
                 return;
             }
 
-            _fluentCommandLineParser.Object.DriveLetter = _fluentCommandLineParser.Object.DriveLetter[0].ToString().ToUpperInvariant();
+            _fluentCommandLineParser.Object.DriveLetter =
+                _fluentCommandLineParser.Object.DriveLetter[0].ToString().ToUpperInvariant();
 
             if (DriveInfo.GetDrives()
                     .Any(t => t.RootDirectory.Name.StartsWith(_fluentCommandLineParser.Object.DriveLetter)) ==
@@ -133,7 +135,7 @@ namespace VSCMount
                     $"\r\n'{_fluentCommandLineParser.Object.DriveLetter}' is not ready. Exiting\r\n");
                 return;
             }
-            
+
             if (_fluentCommandLineParser.Object.Debug)
             {
                 foreach (var r in LogManager.Configuration.LoggingRules)
@@ -177,21 +179,24 @@ namespace VSCMount
 
                 _loggerConsole.Info(
                     $"Mounting VSCs to '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'\r\n");
-                Helpers.MountVss(_fluentCommandLineParser.Object.DriveLetter[0],
+
+                Helpers.MountVss(_fluentCommandLineParser.Object.DriveLetter.Substring(0, 1),
                     $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}",
                     _fluentCommandLineParser.Object.UseDatesInNames);
+
+                _loggerConsole.Info(
+                    $"\r\nMounting complete. Navigate VSCs via symbolic links in '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'");
+
+                _loggerConsole.Warn(
+                    "\r\nTo remove VSC access, delete individual VSC directories or the main mountpoint directory\r\n");
+
+
             }
             catch (Exception ex)
             {
                 _loggerConsole.Error(ex,
                     $"Error when mounting VSCs: {ex.Message}");
             }
-
-            _loggerConsole.Info(
-                $"\r\nMounting complete. Navigate VSCs via symbolic links in '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'");
-
-            _loggerConsole.Warn(
-                $"\r\nTo remove VSC access, delete individual VSC directories or the main mountpoint directory\r\n");
         }
 
 
@@ -207,7 +212,6 @@ namespace VSCMount
 
     internal class ApplicationArguments
     {
-        //Extraction
         public string DriveLetter { get; set; }
         public string MountPoint { get; set; }
         public bool Debug { get; set; }
