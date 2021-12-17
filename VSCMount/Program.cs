@@ -1,230 +1,229 @@
 ﻿using System;
+using System.CommandLine;
+using System.CommandLine.Help;
+using System.CommandLine.NamingConventionBinder;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Threading.Tasks;
 using Exceptionless;
-using Fclp;
 using NLog;
 using NLog.Config;
 using NLog.Targets;
 
-namespace VSCMount
+namespace VSCMount;
+
+internal class Program
 {
-    internal class Program
+    private static Logger _loggerConsole;
+    private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        
+    private static readonly string Header =
+        $"VSCMount version {Assembly.GetExecutingAssembly().GetName().Version}" +
+        "\r\n\r\nAuthor: Eric Zimmerman (saericzimmerman@gmail.com)" +
+        "\r\nhttps://github.com/EricZimmerman/VSCMount";
+
+    private static  string Footer =
+        @"Examples: VSCMount.exe --dl C --mp C:\VssRoot --ud --debug" +
+        "\r\n\t " +
+        "\r\n\t" +
+        "    Short options (single letter) are prefixed with a single dash. Long commands are prefixed with two dashes";
+
+    private static RootCommand _rootCommand;
+
+    private static void SetupNLog()
     {
-        private static Logger _loggerConsole;
-        private static FluentCommandLineParser<ApplicationArguments> _fluentCommandLineParser;
-        private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-
-        private static void SetupNLog()
+        if (File.Exists(Path.Combine(BaseDirectory, "Nlog.config")))
         {
-            if (File.Exists(Path.Combine(BaseDirectory, "Nlog.config")))
-            {
-                return;
-            }
-
-            var config = new LoggingConfiguration();
-            var logLevel = LogLevel.Info;
-
-            const string layout = @"${message}";
-
-            var consoleTarget = new ColoredConsoleTarget();
-
-            config.AddTarget("console", consoleTarget);
-
-            consoleTarget.Layout = layout;
-
-            var rule1 = new LoggingRule("Console", logLevel, consoleTarget);
-            config.LoggingRules.Add(rule1);
-
-            LogManager.Configuration = config;
+            return;
         }
 
-        private static void Main(string[] args)
+        var config = new LoggingConfiguration();
+        var logLevel = LogLevel.Info;
+
+        const string layout = @"${message}";
+
+        var consoleTarget = new ColoredConsoleTarget();
+
+        config.AddTarget("console", consoleTarget);
+
+        consoleTarget.Layout = layout;
+
+        var rule1 = new LoggingRule("Console", logLevel, consoleTarget);
+        config.LoggingRules.Add(rule1);
+
+        LogManager.Configuration = config;
+    }
+
+    private static async Task Main(string[] args)
+    {
+        ExceptionlessClient.Default.Startup("vKFCtHS0H467sgdMz3ZqhVoLYF8IZpOCfv1Q38xM");
+
+        SetupNLog();
+
+        _loggerConsole = LogManager.GetLogger("Console");
+
+        if (IsAdministrator() == false)
         {
-            ExceptionlessClient.Default.Startup("vKFCtHS0H467sgdMz3ZqhVoLYF8IZpOCfv1Q38xM");
+            _loggerConsole.Fatal("Administrator privileges not found! Exiting!!\r\n");
+            return;
+        }
+            
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            _loggerConsole.Error($"Mounting VSCs only supported on Windows. Exiting\r\n");
+            return ;
+        }
+            
+        _rootCommand = new RootCommand
+        {
+            new Option<string>(
+                "--dl",
+                "Source drive to look for Volume Shadow Copies (C, D:, or F:\\ for example)"),
 
-            SetupNLog();
+            new Option<string>(
+                "--mp",
+                "The base directory where you want VSCs mapped to"),
 
-            _loggerConsole = LogManager.GetLogger("Console");
+            new Option<bool>(
+                "--ud",
+                () => true,
+                "Use VSC creation timestamps (yyyyMMddTHHmmss.fffffff) in symbolic link names"),
 
-            if (IsAdministrator() == false)
+            new Option<bool>(
+                "--debug",
+                () => false,
+                "Show debug information during processing"),
+
+        };
+
+        _rootCommand.Description = Header + "\r\n\r\n" + Footer;
+
+        _rootCommand.Handler = CommandHandler.Create(DoWork);
+
+        await _rootCommand.InvokeAsync(args);
+    }
+
+    private static void DoWork(string dl, string mp, bool ud, bool debug)
+    {
+        if (string.IsNullOrEmpty(dl))
+        {
+            var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
+            var hc = new HelpContext(helpBld,_rootCommand,Console.Out);
+
+            helpBld.Write(hc);
+                
+            _loggerConsole.Warn("\r\ndl is required. Exiting\r\n");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(mp))
+        {
+            var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
+            var hc = new HelpContext(helpBld,_rootCommand,Console.Out);
+
+            helpBld.Write(hc);
+                
+            _loggerConsole.Warn("\r\nmp is required. Exiting\r\n");
+            return;
+        }
+
+        dl = dl[0].ToString().ToUpperInvariant();
+
+        if (DriveInfo.GetDrives()
+                .Any(t => t.RootDirectory.Name.StartsWith(dl)) ==
+            false)
+        {
+            _loggerConsole.Error(
+                $"\r\n'{dl}' is not ready. Exiting\r\n");
+            return;
+        }
+
+        if (debug)
+        {
+            foreach (var r in LogManager.Configuration.LoggingRules)
             {
-                _loggerConsole.Fatal("Administrator privileges not found! Exiting!!\r\n");
-                return;
+                r.EnableLoggingForLevel(LogLevel.Debug);
             }
+        }
 
-            _fluentCommandLineParser = new FluentCommandLineParser<ApplicationArguments>
-            {
-                IsCaseSensitive = false
-            };
+        LogManager.ReconfigExistingLoggers();
 
-            _fluentCommandLineParser.Setup(arg => arg.DriveLetter)
-                .As("dl")
-                .WithDescription("Source drive to look for Volume Shadow Copies (C, D:, or F:\\ for example)");
+        _loggerConsole.Info(Header);
+        _loggerConsole.Info("");
 
-            _fluentCommandLineParser.Setup(arg => arg.MountPoint)
-                .As("mp")
-                .WithDescription("The base directory where you want VSCs mapped to");
+        _loggerConsole.Info($"Command line: {string.Join(" ", Environment.GetCommandLineArgs().Skip(1))}");
+        _loggerConsole.Info("");
 
-            _fluentCommandLineParser.Setup(arg => arg.UseDatesInNames)
-                .As("ud")
-                .WithDescription(
-                    "Use VSC creation timestamps (yyyyMMddTHHmmss.fffffff) in symbolic link names. Default is FALSE")
-                .SetDefault(false);
-
-            _fluentCommandLineParser.Setup(arg => arg.Debug)
-                .As("debug")
-                .WithDescription("Show debug information during processing").SetDefault(false);
-
-            var header =
-                $"VSCMount version {Assembly.GetExecutingAssembly().GetName().Version}" +
-                "\r\n\r\nAuthor: Eric Zimmerman (saericzimmerman@gmail.com)" +
-                "\r\nhttps://github.com/EricZimmerman/VSCMount";
-
-            const string footer =
-                @"Examples: VSCMount.exe --dl C --mp C:\VssRoot --debug" +
-                "\r\n\t " +
-                "\r\n\t" +
-                "  Short options (single letter) are prefixed with a single dash. Long commands are prefixed with two dashes\r\n";
-
-            _fluentCommandLineParser.SetupHelp("?", "help")
-                .WithHeader(header)
-                .Callback(text => _loggerConsole.Info(text + "\r\n" + footer));
-
-            var result = _fluentCommandLineParser.Parse(args);
-
-            if (result.HelpCalled)
-            {
-                return;
-            }
-
-            if (result.HasErrors)
-            {
-                _fluentCommandLineParser.HelpOption.ShowHelp(_fluentCommandLineParser.Options);
-
-                _loggerConsole.Error("");
-                _loggerConsole.Error(result.ErrorText);
-
-                return;
-            }
-
-            if (string.IsNullOrEmpty(_fluentCommandLineParser.Object.DriveLetter))
-            {
-                _fluentCommandLineParser.HelpOption.ShowHelp(_fluentCommandLineParser.Options);
-                _loggerConsole.Warn("\r\ndl is required. Exiting\r\n");
-                return;
-            }
-
-            if (string.IsNullOrEmpty(_fluentCommandLineParser.Object.MountPoint))
-            {
-                _fluentCommandLineParser.HelpOption.ShowHelp(_fluentCommandLineParser.Options);
-                _loggerConsole.Warn("\r\nmp is required. Exiting\r\n");
-                return;
-            }
-
-            _fluentCommandLineParser.Object.DriveLetter =
-                _fluentCommandLineParser.Object.DriveLetter[0].ToString().ToUpperInvariant();
-
-            if (DriveInfo.GetDrives()
-                    .Any(t => t.RootDirectory.Name.StartsWith(_fluentCommandLineParser.Object.DriveLetter)) ==
-                false)
-            {
-                _loggerConsole.Error(
-                    $"\r\n'{_fluentCommandLineParser.Object.DriveLetter}' is not ready. Exiting\r\n");
-                return;
-            }
-
-            if (_fluentCommandLineParser.Object.Debug)
-            {
-                foreach (var r in LogManager.Configuration.LoggingRules)
-                {
-                    r.EnableLoggingForLevel(LogLevel.Debug);
-                }
-            }
-
-            LogManager.ReconfigExistingLoggers();
-
-            _loggerConsole.Info(header);
-            _loggerConsole.Info("");
-
-            _loggerConsole.Info($"Command line: {string.Join(" ", args)}");
-            _loggerConsole.Info("");
-
-            if (Directory.Exists(
-                    $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}") ==
-                false)
-            {
-                _loggerConsole.Info(
-                    $"Creating directory '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'");
-
-                try
-                {
-                    Directory.CreateDirectory(
-                        $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}");
-                }
-                catch (Exception e)
-                {
-                    _loggerConsole.Fatal($"Unable to create directory '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'. Does the drive exist? Exiting\r\n");
-
-                    return;
-                }
-            }
+        if (Directory.Exists(
+                $"{mp}_{dl}") ==
+            false)
+        {
+            _loggerConsole.Info(
+                $"Creating directory '{mp}_{dl}'");
 
             try
             {
-                var vssDirs =
-                    Directory.GetDirectories(
-                        $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}",
-                        "vss*");
-
-                _loggerConsole.Debug(
-                    $"Cleaning up vss* directories in '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'");
-                foreach (var vssDir in vssDirs)
-                {
-                    _loggerConsole.Debug($"Deleting '{vssDir}'");
-                    Directory.Delete(vssDir);
-                }
-
-                _loggerConsole.Info(
-                    $"Mounting VSCs to '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'\r\n");
-
-                Helpers.MountVss(_fluentCommandLineParser.Object.DriveLetter.Substring(0, 1),
-                    $"{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}",
-                    _fluentCommandLineParser.Object.UseDatesInNames);
-
-                _loggerConsole.Info(
-                    $"\r\nMounting complete. Navigate VSCs via symbolic links in '{_fluentCommandLineParser.Object.MountPoint}_{_fluentCommandLineParser.Object.DriveLetter}'");
-
-                _loggerConsole.Warn(
-                    "\r\nTo remove VSC access, delete individual VSC directories or the main mountpoint directory\r\n");
-
-
+                Directory.CreateDirectory(
+                    $"{mp}_{dl}");
             }
-            catch (Exception ex)
+            catch (Exception e)
             {
-                _loggerConsole.Error(ex,
-                    $"Error when mounting VSCs: {ex.Message}");
+                _loggerConsole.Fatal($"Unable to create directory '{mp}_{dl}'. Does the drive exist? Error: {e.Message} Exiting\r\n");
+
+                return;
             }
         }
 
-
-        private static bool IsAdministrator()
+        try
         {
-            _loggerConsole.Debug("Checking for admin rights");
-            var identity = WindowsIdentity.GetCurrent();
-            var principal = new WindowsPrincipal(identity);
-            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+            var vssDirs =
+                Directory.GetDirectories(
+                    $"{mp}_{dl}",
+                    "vss*");
+
+            _loggerConsole.Debug(
+                $"Cleaning up vss* directories in '{mp}_{dl}'");
+            foreach (var vssDir in vssDirs)
+            {
+                _loggerConsole.Debug($"Deleting '{vssDir}'");
+                Directory.Delete(vssDir);
+            }
+
+            _loggerConsole.Info(
+                $"Mounting VSCs to '{mp}_{dl}'\r\n");
+
+            Helpers.MountVss(dl.Substring(0, 1),
+                $"{mp}_{dl}",
+                ud);
+
+            _loggerConsole.Info(
+                $"\r\nMounting complete. Navigate VSCs via symbolic links in '{mp}_{dl}'");
+
+            _loggerConsole.Warn(
+                "\r\nTo remove VSC access, delete individual VSC directories or the main mountpoint directory\r\n");
+
+
+        }
+        catch (Exception ex)
+        {
+            _loggerConsole.Error(ex,
+                $"Error when mounting VSCs: {ex.Message}");
         }
     }
 
-
-    internal class ApplicationArguments
+    private static bool IsAdministrator()
     {
-        public string DriveLetter { get; set; }
-        public string MountPoint { get; set; }
-        public bool Debug { get; set; }
-        public bool UseDatesInNames { get; set; }
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return true;
+        }
+            
+        _loggerConsole.Debug("Checking for admin rights");
+        var identity = WindowsIdentity.GetCurrent();
+        var principal = new WindowsPrincipal(identity);
+        return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
 }

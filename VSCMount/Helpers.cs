@@ -1,8 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Management;
 using System.Runtime.InteropServices;
-using Alphaleonis.Win32.Filesystem;
 using NLog;
 using ServiceStack.Text;
 using VSCMount;
@@ -91,10 +92,7 @@ public class Helpers
                 var id = scInfo["ID"].ToString();
                 var installDate = scInfo["InstallDate"].ToString();
 
-                var idd = ManagementDateTimeConverter.ToDateTime(installDate);
-                idd = DateTime.SpecifyKind(idd, DateTimeKind.Local);
-
-                var instDateTimeOffset = new DateTimeOffset(idd).ToUniversalTime();
+                var instDateTimeOffset =  DateTimeOffset.ParseExact(installDate.Substring(0, installDate.Length - 4), "yyyyMMddHHmmss.ffffff", null, DateTimeStyles.AssumeLocal).ToUniversalTime();
 
                 var origMachine = scInfo["OriginatingMachine"].ToString();
                 var serviceMachine = scInfo["ServiceMachine"].ToString();
@@ -135,10 +133,10 @@ public class Helpers
             loggerConsole.Debug("mountRoot directory exists. Deleting...");
             foreach (var directory in Directory.GetDirectories(mountRoot))
             {
-                Directory.Delete(directory, true, true);
+                Directory.Delete(directory, true);
             }
 
-            Directory.Delete(mountRoot, true, true);
+            Directory.Delete(mountRoot, true);
         }
 
         if (Directory.Exists(mountRoot) == false)
