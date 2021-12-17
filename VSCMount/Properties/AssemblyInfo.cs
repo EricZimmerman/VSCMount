@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
+
 [assembly: AssemblyTrademark("Eric Zimmerman")]
 
 // Setting ComVisible to false makes the types in this assembly not visible

@@ -19,13 +19,13 @@ internal class Program
 {
     private static Logger _loggerConsole;
     private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-        
+
     private static readonly string Header =
         $"VSCMount version {Assembly.GetExecutingAssembly().GetName().Version}" +
         "\r\n\r\nAuthor: Eric Zimmerman (saericzimmerman@gmail.com)" +
         "\r\nhttps://github.com/EricZimmerman/VSCMount";
 
-    private static  string Footer =
+    private static readonly string Footer =
         @"Examples: VSCMount.exe --dl C --mp C:\VssRoot --ud --debug" +
         "\r\n\t " +
         "\r\n\t" +
@@ -70,13 +70,13 @@ internal class Program
             _loggerConsole.Fatal("Administrator privileges not found! Exiting!!\r\n");
             return;
         }
-            
+
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            _loggerConsole.Error($"Mounting VSCs only supported on Windows. Exiting\r\n");
-            return ;
+            _loggerConsole.Error("Mounting VSCs only supported on Windows. Exiting\r\n");
+            return;
         }
-            
+
         _rootCommand = new RootCommand
         {
             new Option<string>(
@@ -95,8 +95,7 @@ internal class Program
             new Option<bool>(
                 "--debug",
                 () => false,
-                "Show debug information during processing"),
-
+                "Show debug information during processing")
         };
 
         _rootCommand.Description = Header + "\r\n\r\n" + Footer;
@@ -111,10 +110,10 @@ internal class Program
         if (string.IsNullOrEmpty(dl))
         {
             var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
-            var hc = new HelpContext(helpBld,_rootCommand,Console.Out);
+            var hc = new HelpContext(helpBld, _rootCommand, Console.Out);
 
             helpBld.Write(hc);
-                
+
             _loggerConsole.Warn("\r\ndl is required. Exiting\r\n");
             return;
         }
@@ -122,10 +121,10 @@ internal class Program
         if (string.IsNullOrEmpty(mp))
         {
             var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
-            var hc = new HelpContext(helpBld,_rootCommand,Console.Out);
+            var hc = new HelpContext(helpBld, _rootCommand, Console.Out);
 
             helpBld.Write(hc);
-                
+
             _loggerConsole.Warn("\r\nmp is required. Exiting\r\n");
             return;
         }
@@ -204,8 +203,6 @@ internal class Program
 
             _loggerConsole.Warn(
                 "\r\nTo remove VSC access, delete individual VSC directories or the main mountpoint directory\r\n");
-
-
         }
         catch (Exception ex)
         {
@@ -220,7 +217,7 @@ internal class Program
         {
             return true;
         }
-            
+
         _loggerConsole.Debug("Checking for admin rights");
         var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);

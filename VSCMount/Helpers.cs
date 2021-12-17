@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Management;
 using System.Runtime.InteropServices;
 using NLog;
 using ServiceStack.Text;
@@ -85,14 +84,14 @@ public class Helpers
         using (var con = new WmiConnection())
         {
             foreach (var scInfo in con.CreateQuery(
-                "SELECT DeviceObject,ID,InstallDate,OriginatingMachine,VolumeName,ServiceMachine FROM Win32_ShadowCopy")
-            )
+                         "SELECT DeviceObject,ID,InstallDate,OriginatingMachine,VolumeName,ServiceMachine FROM Win32_ShadowCopy")
+                    )
             {
                 var devObj = scInfo["DeviceObject"].ToString();
                 var id = scInfo["ID"].ToString();
                 var installDate = scInfo["InstallDate"].ToString();
 
-                var instDateTimeOffset =  DateTimeOffset.ParseExact(installDate.Substring(0, installDate.Length - 4), "yyyyMMddHHmmss.ffffff", null, DateTimeStyles.AssumeLocal).ToUniversalTime();
+                var instDateTimeOffset = DateTimeOffset.ParseExact(installDate.Substring(0, installDate.Length - 4), "yyyyMMddHHmmss.ffffff", null, DateTimeStyles.AssumeLocal).ToUniversalTime();
 
                 var origMachine = scInfo["OriginatingMachine"].ToString();
                 var serviceMachine = scInfo["ServiceMachine"].ToString();
