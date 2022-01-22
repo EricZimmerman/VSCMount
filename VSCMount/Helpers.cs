@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
-using NLog;
+using Serilog;
 using ServiceStack.Text;
 using VSCMount;
 using WmiLight;
@@ -53,33 +53,24 @@ public class Helpers
 
     public static List<VssInfo> GetVssInfoViaWmi(string driveLetter)
     {
-        if (driveLetter == null)
-        {
-            driveLetter = string.Empty;
-        }
+        if (driveLetter == null) driveLetter = string.Empty;
 
-        if (driveLetter.Length > 1)
-        {
-            driveLetter = driveLetter.Substring(0, 1);
-        }
+        if (driveLetter.Length > 1) driveLetter = driveLetter.Substring(0, 1);
 
-        var loggerConsole = LogManager.GetLogger("Console");
 
         var vss = new List<VssInfo>();
 
-        loggerConsole.Debug("Running WMI queries to get VSC info");
+        Log.Debug("Running WMI queries to get VSC info");
 
         var volInfo = new Dictionary<string, string>();
 
         using (var con = new WmiConnection())
         {
             foreach (var vol in con.CreateQuery("SELECT caption,DeviceID FROM Win32_volume"))
-            {
                 volInfo.Add(vol["DeviceID"].ToString(), vol["caption"].ToString());
-            }
         }
 
-        loggerConsole.Trace($"Volume info from WMI: {volInfo.Dump()}");
+        Log.Verbose("Volume info from WMI: {VolInfo}", volInfo.Dump());
 
         using (var con = new WmiConnection())
         {
@@ -91,7 +82,8 @@ public class Helpers
                 var id = scInfo["ID"].ToString();
                 var installDate = scInfo["InstallDate"].ToString();
 
-                var instDateTimeOffset = DateTimeOffset.ParseExact(installDate.Substring(0, installDate.Length - 4), "yyyyMMddHHmmss.ffffff", null, DateTimeStyles.AssumeLocal).ToUniversalTime();
+                var instDateTimeOffset = DateTimeOffset.ParseExact(installDate.Substring(0, installDate.Length - 4),
+                    "yyyyMMddHHmmss.ffffff", null, DateTimeStyles.AssumeLocal).ToUniversalTime();
 
                 var origMachine = scInfo["OriginatingMachine"].ToString();
                 var serviceMachine = scInfo["ServiceMachine"].ToString();
@@ -104,70 +96,60 @@ public class Helpers
 
                 if (!volLetter.ToUpperInvariant().StartsWith(driveLetter.ToUpperInvariant()) &&
                     driveLetter.Trim().Length != 0)
-                {
                     continue;
-                }
 
-                loggerConsole.Trace($"Adding VSC: {vsI.Dump()}");
+                Log.Verbose("Adding VSC: {Vsc}", vsI.Dump());
                 vss.Add(vsI);
             }
         }
 
-        loggerConsole.Debug($"Found {vss.Count:N0} VSCs");
+        Log.Debug("Found {Count:N0} VSCs", vss.Count);
 
         return vss;
     }
 
     public static void MountVss(string driveLetter, string mountRoot, bool useDatesInNames)
     {
-        var loggerConsole = LogManager.GetLogger("Console");
-
         var existingVss = GetVssInfoViaWmi(driveLetter);
 
-        loggerConsole.Warn(
-            $"VSCs found on volume {driveLetter.ToUpperInvariant()}: {existingVss.Count:N0}. Mounting...");
+        Log.Warning(
+            "VSCs found on volume {DriveLetter}: {Count:N0}. Mounting...", driveLetter.ToUpperInvariant(),
+            existingVss.Count);
 
         if (Directory.Exists(mountRoot))
         {
-            loggerConsole.Debug("mountRoot directory exists. Deleting...");
-            foreach (var directory in Directory.GetDirectories(mountRoot))
-            {
-                Directory.Delete(directory, true);
-            }
+            Log.Debug("mountRoot directory exists. Deleting...");
+            foreach (var directory in Directory.GetDirectories(mountRoot)) Directory.Delete(directory, true);
 
             Directory.Delete(mountRoot, true);
         }
 
         if (Directory.Exists(mountRoot) == false)
         {
-            loggerConsole.Debug($"Creating mountRoot directory: {mountRoot}");
+            Log.Debug("Creating mountRoot directory: {MountRoot}", mountRoot);
             Directory.CreateDirectory(mountRoot);
         }
 
         foreach (var vssInfo in existingVss)
         {
-            loggerConsole.Debug(
-                $"Attempting to mount VSS with Id: {vssInfo.ShadowCopyId}, Creation date: {vssInfo.CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff}");
+            Log.Debug(
+                "Attempting to mount VSS with Id: {ShadowCopyId}, Creation date: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff}",
+                vssInfo.ShadowCopyId, vssInfo.CreatedOn);
 
             var mountDir = $@"{mountRoot}\vss{vssInfo.VssNumber:000}";
 
-            if (useDatesInNames)
-            {
-                mountDir = $"{mountDir}-{vssInfo.CreatedOn:yyyyMMddTHHmmss.fffffff}";
-            }
+            if (useDatesInNames) mountDir = $"{mountDir}-{vssInfo.CreatedOn:yyyyMMddTHHmmss.fffffff}";
 
             var worked = CreateSymbolicLink(mountDir, $@"{vssInfo.ShadowCopyVolume}\", SymbolicLink.Directory);
 
             if (worked)
-            {
-                loggerConsole.Info(
-                    $"\tVSS {vssInfo.VssNumber.ToString().PadRight(4)} (Id {vssInfo.ShadowCopyId}, Created on: {vssInfo.CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) mounted OK!");
-            }
+                Log.Information(
+                    "\tVSS {VssNumber} (Id {ShadowCopyId}, Created on: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) mounted OK!",
+                    vssInfo.VssNumber.ToString().PadRight(4), vssInfo.ShadowCopyId, vssInfo.CreatedOn);
             else
-            {
-                loggerConsole.Warn(
-                    $"\tVSS {vssInfo.VssNumber.ToString().PadRight(4)} (Id {vssInfo.ShadowCopyId}, Created on: {vssInfo.CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) failed to mount!");
-            }
+                Log.Warning(
+                    "\tVSS {VssNumber} (Id {ShadowCopyId}, Created on: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) failed to mount!",
+                    vssInfo.VssNumber.ToString().PadRight(4), vssInfo.ShadowCopyId, vssInfo.CreatedOn);
         }
     }
 }

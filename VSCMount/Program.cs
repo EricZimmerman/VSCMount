@@ -9,15 +9,14 @@ using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading.Tasks;
 using Exceptionless;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 
 namespace VSCMount;
 
 internal class Program
 {
-    private static Logger _loggerConsole;
     private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
     private static readonly string Header =
@@ -33,47 +32,31 @@ internal class Program
 
     private static RootCommand _rootCommand;
 
-    private static void SetupNLog()
-    {
-        if (File.Exists(Path.Combine(BaseDirectory, "Nlog.config")))
-        {
-            return;
-        }
-
-        var config = new LoggingConfiguration();
-        var logLevel = LogLevel.Info;
-
-        const string layout = @"${message}";
-
-        var consoleTarget = new ColoredConsoleTarget();
-
-        config.AddTarget("console", consoleTarget);
-
-        consoleTarget.Layout = layout;
-
-        var rule1 = new LoggingRule("Console", logLevel, consoleTarget);
-        config.LoggingRules.Add(rule1);
-
-        LogManager.Configuration = config;
-    }
+    private static readonly LoggingLevelSwitch _levelSwitch = new();
 
     private static async Task Main(string[] args)
     {
         ExceptionlessClient.Default.Startup("vKFCtHS0H467sgdMz3ZqhVoLYF8IZpOCfv1Q38xM");
 
-        SetupNLog();
+        var template = "{Message:lj}{NewLine}{Exception}";
 
-        _loggerConsole = LogManager.GetLogger("Console");
+        var conf = new LoggerConfiguration()
+            .WriteTo.Console(outputTemplate: template)
+            .MinimumLevel.ControlledBy(_levelSwitch);
+
+        Log.Logger = conf.CreateLogger();
 
         if (IsAdministrator() == false)
         {
-            _loggerConsole.Fatal("Administrator privileges not found! Exiting!!\r\n");
+            Log.Fatal("Administrator privileges not found! Exiting!!");
+            Console.WriteLine();
             return;
         }
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            _loggerConsole.Error("Mounting VSCs only supported on Windows. Exiting\r\n");
+            Log.Error("Mounting VSCs only supported on Windows. Exiting");
+            Console.WriteLine();
             return;
         }
 
@@ -103,18 +86,45 @@ internal class Program
         _rootCommand.Handler = CommandHandler.Create(DoWork);
 
         await _rootCommand.InvokeAsync(args);
+
+        Log.CloseAndFlush();
     }
 
     private static void DoWork(string dl, string mp, bool ud, bool debug)
     {
+        var template = "{Message:lj}{NewLine}{Exception}";
+        if (debug)
+        {
+            _levelSwitch.MinimumLevel = LogEventLevel.Debug;
+
+            template = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}";
+        }
+
+        var conf = new LoggerConfiguration()
+            .WriteTo.Console(outputTemplate: template)
+            .MinimumLevel.ControlledBy(_levelSwitch);
+
+        Log.Logger = conf.CreateLogger();
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            Console.WriteLine();
+            Log.Fatal(
+                "Non-Windows platforms not supported due to the need to use specific Windows libraries! Exiting...");
+            Console.WriteLine();
+            Environment.Exit(0);
+            return;
+        }
+
         if (string.IsNullOrEmpty(dl))
         {
             var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
             var hc = new HelpContext(helpBld, _rootCommand, Console.Out);
 
             helpBld.Write(hc);
-
-            _loggerConsole.Warn("\r\ndl is required. Exiting\r\n");
+            Console.WriteLine();
+            Log.Warning("--dl is required. Exiting");
+            Console.WriteLine();
             return;
         }
 
@@ -124,8 +134,9 @@ internal class Program
             var hc = new HelpContext(helpBld, _rootCommand, Console.Out);
 
             helpBld.Write(hc);
-
-            _loggerConsole.Warn("\r\nmp is required. Exiting\r\n");
+            Console.WriteLine();
+            Log.Warning("--mp is required. Exiting");
+            Console.WriteLine();
             return;
         }
 
@@ -135,42 +146,34 @@ internal class Program
                 .Any(t => t.RootDirectory.Name.StartsWith(dl)) ==
             false)
         {
-            _loggerConsole.Error(
-                $"\r\n'{dl}' is not ready. Exiting\r\n");
+            Console.WriteLine();
+            Log.Error("{Dl} is not ready. Exiting", dl);
+            Console.WriteLine();
             return;
         }
 
-        if (debug)
-        {
-            foreach (var r in LogManager.Configuration.LoggingRules)
-            {
-                r.EnableLoggingForLevel(LogLevel.Debug);
-            }
-        }
 
-        LogManager.ReconfigExistingLoggers();
+        Log.Information("{Header}", Header);
+        Console.WriteLine();
 
-        _loggerConsole.Info(Header);
-        _loggerConsole.Info("");
-
-        _loggerConsole.Info($"Command line: {string.Join(" ", Environment.GetCommandLineArgs().Skip(1))}");
-        _loggerConsole.Info("");
+        Log.Information("Command line: {Args}", string.Join(" ", Environment.GetCommandLineArgs().Skip(1)));
+        Console.WriteLine();
 
         if (Directory.Exists(
                 $"{mp}_{dl}") ==
             false)
         {
-            _loggerConsole.Info(
-                $"Creating directory '{mp}_{dl}'");
+            Log.Information("Creating directory {Mp}_{Dl}", mp, dl);
 
             try
             {
-                Directory.CreateDirectory(
-                    $"{mp}_{dl}");
+                Directory.CreateDirectory($"{mp}_{dl}");
             }
             catch (Exception e)
             {
-                _loggerConsole.Fatal($"Unable to create directory '{mp}_{dl}'. Does the drive exist? Error: {e.Message} Exiting\r\n");
+                Log.Fatal(e, "Unable to create directory {Mp}_{Dl}. Does the drive exist? Error: {Message} Exiting", mp,
+                    dl, e.Message);
+                Console.WriteLine();
 
                 return;
             }
@@ -183,42 +186,38 @@ internal class Program
                     $"{mp}_{dl}",
                     "vss*");
 
-            _loggerConsole.Debug(
-                $"Cleaning up vss* directories in '{mp}_{dl}'");
+            Log.Debug("Cleaning up vss* directories in {Mp}_{Dl}", mp, dl);
             foreach (var vssDir in vssDirs)
             {
-                _loggerConsole.Debug($"Deleting '{vssDir}'");
+                Log.Debug("Deleting {VssDir}", vssDir);
                 Directory.Delete(vssDir);
             }
 
-            _loggerConsole.Info(
-                $"Mounting VSCs to '{mp}_{dl}'\r\n");
+            Log.Information("Mounting VSCs to {Mp}_{Dl}", mp, dl);
+            Console.WriteLine();
 
             Helpers.MountVss(dl.Substring(0, 1),
                 $"{mp}_{dl}",
                 ud);
 
-            _loggerConsole.Info(
-                $"\r\nMounting complete. Navigate VSCs via symbolic links in '{mp}_{dl}'");
+            Console.WriteLine();
+            Log.Information("Mounting complete. Navigate VSCs via symbolic links in {Mp}_{Dl}", mp, dl);
 
-            _loggerConsole.Warn(
-                "\r\nTo remove VSC access, delete individual VSC directories or the main mountpoint directory\r\n");
+            Console.WriteLine();
+            Log.Warning("To remove VSC access, delete individual VSC directories or the main mountpoint directory");
+            Console.WriteLine();
         }
         catch (Exception ex)
         {
-            _loggerConsole.Error(ex,
-                $"Error when mounting VSCs: {ex.Message}");
+            Log.Error(ex, "Error when mounting VSCs: {Message}", ex.Message);
         }
     }
 
     private static bool IsAdministrator()
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return true;
-        }
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return true;
 
-        _loggerConsole.Debug("Checking for admin rights");
+        Log.Debug("Checking for admin rights");
         var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
