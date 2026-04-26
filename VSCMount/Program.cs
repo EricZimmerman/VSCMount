@@ -1,7 +1,7 @@
 ﻿using System;
 using System.CommandLine;
 using System.CommandLine.Help;
-using System.CommandLine.NamingConventionBinder;
+using System.CommandLine.Invocation;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -20,7 +20,7 @@ internal class Program
     private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
     private static readonly string Header =
-        $"VSCMount version {Assembly.GetExecutingAssembly().GetName().Version}" +
+        $"VSCMount version {Assembly.GetExecutingAssembly().GetName().Version.ToString(3)}" +
         "\r\n\r\nAuthor: Eric Zimmerman (saericzimmerman@gmail.com)" +
         "\r\nhttps://github.com/EricZimmerman/VSCMount";
 
@@ -60,35 +60,67 @@ internal class Program
             return;
         }
 
+        var dlOpt = new Option<string>("--dl")
+        {
+            Description = "Source drive to look for Volume Shadow Copies (C, D:, or F:\\ for example)"
+        };
+        
+        var mpOpt = new Option<string>("--mp")
+        {
+            Description = "The base directory where you want VSCs mapped to"
+        };
+        
+        var udOpt = new Option<bool>("--ud")
+        {
+            Description = "Use VSC creation timestamps (yyyyMMddTHHmmss.fffffff) in symbolic link names",
+            DefaultValueFactory = _ => true
+        };
+        
+        var debugOpt = new Option<bool>("--debug")
+        {
+            Description = "Show debug information during processing",
+            DefaultValueFactory = _ => false
+        };
+        
         _rootCommand = new RootCommand
         {
-            new Option<string>(
-                "--dl",
-                "Source drive to look for Volume Shadow Copies (C, D:, or F:\\ for example)"),
-
-            new Option<string>(
-                "--mp",
-                "The base directory where you want VSCs mapped to"),
-
-            new Option<bool>(
-                "--ud",
-                () => true,
-                "Use VSC creation timestamps (yyyyMMddTHHmmss.fffffff) in symbolic link names"),
-
-            new Option<bool>(
-                "--debug",
-                () => false,
-                "Show debug information during processing")
+           dlOpt,
+           mpOpt,
+           udOpt,
+           debugOpt
         };
 
         _rootCommand.Description = Header + "\r\n\r\n" + Footer;
 
-        _rootCommand.Handler = CommandHandler.Create(DoWork);
+        //_rootCommand.Handler = CommandHandler.Create(DoWork);
+        _rootCommand.SetAction(result => DoWork(result.GetValue(dlOpt),result.GetValue(mpOpt),result.GetValue(udOpt),result.GetValue(debugOpt)));
 
-        await _rootCommand.InvokeAsync(args);
+        var foo = _rootCommand.Parse(args).InvokeAsync();
 
         Log.CloseAndFlush();
     }
+    
+    private class CustomHelpAction : SynchronousCommandLineAction
+    {
+        private readonly HelpAction _defaultHelp;
+
+        public CustomHelpAction(HelpAction action)
+        {
+            _defaultHelp = action;
+        }
+
+        public override int Invoke(ParseResult parseResult)
+        {
+            var result = _defaultHelp.Invoke(parseResult);
+
+            Log.Warning("{Msg}", string.Join(' ',parseResult.Tokens));
+
+            return result;
+        }
+    }
+    
+    
+   
 
     private static void DoWork(string dl, string mp, bool ud, bool debug)
     {
@@ -118,26 +150,18 @@ internal class Program
 
         if (string.IsNullOrEmpty(dl))
         {
-            var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
-            var hc = new HelpContext(helpBld, _rootCommand, Console.Out);
+            var aaa = new CustomHelpAction(new HelpAction());
+            aaa.Invoke(_rootCommand.Parse("--dl is required. Exiting"));
 
-            helpBld.Write(hc);
-            Console.WriteLine();
-            Log.Warning("--dl is required. Exiting");
-            Console.WriteLine();
             return;
         }
 
         if (string.IsNullOrEmpty(mp))
         {
-            var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
-            var hc = new HelpContext(helpBld, _rootCommand, Console.Out);
+              var aaa = new CustomHelpAction(new HelpAction());
+                aaa.Invoke(_rootCommand.Parse("--mp is required. Exiting"));
 
-            helpBld.Write(hc);
-            Console.WriteLine();
-            Log.Warning("--mp is required. Exiting");
-            Console.WriteLine();
-            return;
+                return;
         }
 
         dl = dl[0].ToString().ToUpperInvariant();
