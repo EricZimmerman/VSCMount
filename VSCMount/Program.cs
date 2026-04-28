@@ -82,18 +82,25 @@ internal class Program
             DefaultValueFactory = _ => false
         };
         
+        var traceOpt = new Option<bool>("--trace")
+        {
+            Description = "Show trace information during processing",
+            DefaultValueFactory = _ => false
+        };
+        
         _rootCommand = new RootCommand
         {
            dlOpt,
            mpOpt,
            udOpt,
-           debugOpt
+           debugOpt,
+           traceOpt
         };
 
         _rootCommand.Description = Header + "\r\n\r\n" + Footer;
 
         //_rootCommand.Handler = CommandHandler.Create(DoWork);
-        _rootCommand.SetAction(result => DoWork(result.GetValue(dlOpt),result.GetValue(mpOpt),result.GetValue(udOpt),result.GetValue(debugOpt)));
+        _rootCommand.SetAction(result => DoWork(result.GetValue(dlOpt),result.GetValue(mpOpt),result.GetValue(udOpt),result.GetValue(debugOpt),result.GetValue(traceOpt)));
 
         var foo = _rootCommand.Parse(args).InvokeAsync();
 
@@ -118,17 +125,19 @@ internal class Program
             return result;
         }
     }
-    
-    
-   
 
-    private static void DoWork(string dl, string mp, bool ud, bool debug)
+    private static void DoWork(string dl, string mp, bool ud, bool debug, bool trace)
     {
         var template = "{Message:lj}{NewLine}{Exception}";
         if (debug)
         {
             _levelSwitch.MinimumLevel = LogEventLevel.Debug;
 
+            template = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}";
+        }
+        if (trace)
+        {
+            _levelSwitch.MinimumLevel = LogEventLevel.Verbose;
             template = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}";
         }
 
