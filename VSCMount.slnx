@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+  </Configurations>
+  <Project Path="VSCMount.Test/VSCMount.Test.csproj" />
+  <Project Path="VSCMount/VSCMount.csproj" />
+</Solution>

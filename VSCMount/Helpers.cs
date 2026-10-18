@@ -1,155 +1,153 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using Serilog;
-using ServiceStack.Text;
-using VSCMount;
 using WmiLight;
 
-namespace VSCMount
+namespace VSCMount;
+
+public class VssInfo
 {
-    public class VssInfo
+    public VssInfo(int vssNumber, DateTimeOffset? createdOn, string shadowCopyId, string shadowCopyVolume,
+        string originatingMachine, string servicingMachine, char volumeLetter, string originalVolume)
     {
-        public VssInfo(DateTimeOffset createdOn, string shadowCopyId, string shadowCopyVolume,
-            string originatingMachine, string servicingMachine, string volumeLetter, string originalVolume)
-        {
-            CreatedOn = createdOn;
-            ShadowCopyId = shadowCopyId.ToLowerInvariant();
-            ShadowCopyVolume = shadowCopyVolume;
-            OriginatingMachine = originatingMachine;
-            ServicingMachine = servicingMachine;
-            VolumeLetter = volumeLetter;
-            OriginalVolume = originalVolume;
-
-            VssNumber = int.Parse(
-                shadowCopyVolume.Substring(shadowCopyVolume.IndexOf("VolumeShadowCopy", StringComparison.Ordinal) +
-                                           16));
-        }
-
-        public DateTimeOffset CreatedOn { get; }
-        public string ShadowCopyId { get; }
-        public string ShadowCopyVolume { get; }
-        public string OriginatingMachine { get; }
-        public string ServicingMachine { get; }
-        public string VolumeLetter { get; }
-        public string OriginalVolume { get; }
-        public int VssNumber { get; }
+        VssNumber = vssNumber;
+        CreatedOn = createdOn;
+        ShadowCopyId = shadowCopyId?.ToLowerInvariant();
+        ShadowCopyVolume = shadowCopyVolume;
+        OriginatingMachine = originatingMachine;
+        ServicingMachine = servicingMachine;
+        VolumeLetter = volumeLetter;
+        OriginalVolume = originalVolume;
     }
+
+    /// <summary>UTC. Null when WMI's value can't be read</summary>
+    public DateTimeOffset? CreatedOn { get; }
+
+    public string ShadowCopyId { get; }
+    public string ShadowCopyVolume { get; }
+    public string OriginatingMachine { get; }
+    public string ServicingMachine { get; }
+    public char VolumeLetter { get; }
+    public string OriginalVolume { get; }
+    public int VssNumber { get; }
 }
 
-public class Helpers
+public static class Helpers
 {
-    public enum SymbolicLink
+    private const uint SymbolicLinkFlagDirectory = 1;
+
+    //CreateSymbolicLinkW returns BOOLEAN (1 byte), not BOOL, so the return value must be marshaled as I1
+    [DllImport("kernel32.dll", EntryPoint = "CreateSymbolicLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool CreateSymbolicLink(string lpSymlinkFileName, string lpTargetFileName, uint dwFlags);
+
+    /// <summary>
+    ///     The shadow copies of the volume with <paramref name="driveLetter" />, by number. Copies that can't be used are
+    ///     skipped with a warning
+    /// </summary>
+    public static List<VssInfo> GetVssInfoViaWmi(char driveLetter)
     {
-        File = 0,
-        Directory = 1
-    }
-
-    [DllImport("kernel32.dll")]
-    public static extern bool CreateSymbolicLink(
-        string lpSymlinkFileName, string lpTargetFileName, SymbolicLink dwFlags);
-
-    public static List<VssInfo> GetVssInfoViaWmi(string driveLetter)
-    {
-        if (driveLetter == null) driveLetter = string.Empty;
-
-        if (driveLetter.Length > 1) driveLetter = driveLetter.Substring(0, 1);
-
-
-        var vss = new List<VssInfo>();
-
         Log.Debug("Running WMI queries to get VSC info");
 
-        var volInfo = new Dictionary<string, string>();
+        var vss = new List<VssInfo>();
+        var volumes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        using (var con = new WmiConnection())
+        using var con = new WmiConnection();
+
+        foreach (var vol in con.CreateQuery("SELECT Caption,DeviceID FROM Win32_Volume"))
         {
-            foreach (var vol in con.CreateQuery("SELECT caption,DeviceID FROM Win32_volume"))
-                volInfo.Add(vol["DeviceID"].ToString(), vol["caption"].ToString());
+            var deviceId = vol["DeviceID"]?.ToString();
+            var caption = vol["Caption"]?.ToString();
+
+            if (deviceId != null && caption != null) volumes[deviceId] = caption;
         }
 
-        Log.Verbose("Volume info from WMI: {VolInfo}", volInfo.Dump());
+        Log.Verbose("Volume info from WMI: {@Volumes}", volumes);
 
-        using (var con = new WmiConnection())
+        foreach (var scInfo in con.CreateQuery(
+                     "SELECT DeviceObject,ID,InstallDate,OriginatingMachine,VolumeName,ServiceMachine FROM Win32_ShadowCopy"))
         {
-            foreach (var scInfo in con.CreateQuery(
-                         "SELECT DeviceObject,ID,InstallDate,OriginatingMachine,VolumeName,ServiceMachine FROM Win32_ShadowCopy")
-                    )
+            var id = scInfo["ID"]?.ToString();
+            var devObj = scInfo["DeviceObject"]?.ToString();
+            var origVolume = scInfo["VolumeName"]?.ToString();
+
+            if (origVolume == null || !volumes.TryGetValue(origVolume, out var caption))
             {
-                var devObj = scInfo["DeviceObject"].ToString();
-                var id = scInfo["ID"].ToString();
-                var installDate = scInfo["InstallDate"].ToString();
-
-                var instDateTimeOffset = DateTimeOffset.ParseExact(installDate.Substring(0, installDate.Length - 4),
-                    "yyyyMMddHHmmss.ffffff", null, DateTimeStyles.AssumeLocal).ToUniversalTime();
-
-                var origMachine = scInfo["OriginatingMachine"].ToString();
-                var serviceMachine = scInfo["ServiceMachine"].ToString();
-                var origVolume = scInfo["VolumeName"].ToString();
-
-                var volLetter = volInfo[origVolume].Substring(0, 1);
-
-                var vsI = new VssInfo(instDateTimeOffset, id, devObj, origMachine, serviceMachine, volLetter,
-                    origVolume);
-
-                if (!volLetter.ToUpperInvariant().StartsWith(driveLetter.ToUpperInvariant()) &&
-                    driveLetter.Trim().Length != 0)
-                    continue;
-
-                Log.Verbose("Adding VSC: {Vsc}", vsI.Dump());
-                vss.Add(vsI);
+                Log.Warning("VSC {Id} is of volume {Volume}, which WMI does not list. Skipping", id, origVolume);
+                continue;
             }
+
+            //The caption is C:\ for a volume with a drive letter, else its mount folder or volume GUID path
+            if (VssParsing.NormalizeDriveLetter(caption) != driveLetter) continue;
+
+            var vssNumber = VssParsing.GetShadowCopyNumber(devObj);
+            if (vssNumber == null)
+            {
+                Log.Warning("VSC {Id} has an unexpected device name ({DeviceObject}). Skipping", id, devObj);
+                continue;
+            }
+
+            var installDate = scInfo["InstallDate"];
+            var createdOn = installDate switch
+            {
+                DateTime dateTime => new DateTimeOffset(dateTime).ToUniversalTime(),
+                _ => VssParsing.ParseCimDateTime(installDate?.ToString())
+            };
+
+            if (createdOn == null)
+                Log.Warning("VSC {Id} has a creation date that can't be read ({InstallDate})", id, installDate);
+
+            var vsI = new VssInfo(vssNumber.Value, createdOn, id, devObj, scInfo["OriginatingMachine"]?.ToString(),
+                scInfo["ServiceMachine"]?.ToString(), driveLetter, origVolume);
+
+            Log.Verbose("Adding VSC: {@Vsc}", vsI);
+            vss.Add(vsI);
         }
+
+        vss.Sort((a, b) => a.VssNumber.CompareTo(b.VssNumber));
 
         Log.Debug("Found {Count:N0} VSCs", vss.Count);
 
         return vss;
     }
 
-    public static void MountVss(string driveLetter, string mountRoot, bool useDatesInNames)
+    /// <summary>
+    ///     Creates a symbolic link in <paramref name="mountRoot" /> for each shadow copy
+    /// </summary>
+    /// <returns>The number of links that could not be created</returns>
+    public static int MountVss(IReadOnlyList<VssInfo> shadowCopies, string mountRoot, bool useDatesInNames)
     {
-        var existingVss = GetVssInfoViaWmi(driveLetter);
+        var failed = 0;
 
-        Log.Warning(
-            "VSCs found on volume {DriveLetter}: {Count:N0}. Mounting...", driveLetter.ToUpperInvariant(),
-            existingVss.Count);
-
-        if (Directory.Exists(mountRoot))
-        {
-            Log.Debug("mountRoot directory exists. Deleting...");
-            foreach (var directory in Directory.GetDirectories(mountRoot)) Directory.Delete(directory, true);
-
-            Directory.Delete(mountRoot, true);
-        }
-
-        if (Directory.Exists(mountRoot) == false)
-        {
-            Log.Debug("Creating mountRoot directory: {MountRoot}", mountRoot);
-            Directory.CreateDirectory(mountRoot);
-        }
-
-        foreach (var vssInfo in existingVss)
+        foreach (var vssInfo in shadowCopies)
         {
             Log.Debug(
                 "Attempting to mount VSS with Id: {ShadowCopyId}, Creation date: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff}",
                 vssInfo.ShadowCopyId, vssInfo.CreatedOn);
 
-            var mountDir = $@"{mountRoot}\vss{vssInfo.VssNumber:000}";
+            var mountDir = Path.Combine(mountRoot,
+                VssParsing.GetLinkName(vssInfo.VssNumber, vssInfo.CreatedOn, useDatesInNames));
 
-            if (useDatesInNames) mountDir = $"{mountDir}-{vssInfo.CreatedOn:yyyyMMddTHHmmss.fffffff}";
-
-            var worked = CreateSymbolicLink(mountDir, $@"{vssInfo.ShadowCopyVolume}\", SymbolicLink.Directory);
-
-            if (worked)
+            if (CreateSymbolicLink(mountDir, $@"{vssInfo.ShadowCopyVolume}\", SymbolicLinkFlagDirectory))
+            {
                 Log.Information(
                     "\tVSS {VssNumber} (Id {ShadowCopyId}, Created on: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) mounted OK!",
                     vssInfo.VssNumber.ToString().PadRight(4), vssInfo.ShadowCopyId, vssInfo.CreatedOn);
+            }
             else
+            {
+                var reason = new Win32Exception(Marshal.GetLastPInvokeError()).Message;
+
                 Log.Warning(
-                    "\tVSS {VssNumber} (Id {ShadowCopyId}, Created on: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) failed to mount!",
-                    vssInfo.VssNumber.ToString().PadRight(4), vssInfo.ShadowCopyId, vssInfo.CreatedOn);
+                    "\tVSS {VssNumber} (Id {ShadowCopyId}, Created on: {CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff} UTC) failed to mount: {Reason}",
+                    vssInfo.VssNumber.ToString().PadRight(4), vssInfo.ShadowCopyId, vssInfo.CreatedOn, reason);
+                failed++;
+            }
         }
+
+        return failed;
     }
 }
