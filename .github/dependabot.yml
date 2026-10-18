@@ -12,3 +12,6 @@ updates:
       # FluentAssertions 8.x requires a commercial license; stay on 7.x
       - dependency-name: FluentAssertions
         versions: [">= 8.0.0"]
+      # WmiLight 5.0.0 and later need WmiLight.Native.dll; 4.0.0 is fully managed, so VSCMount ships as an exe and a dll
+      - dependency-name: WmiLight
+        versions: [">= 5.0.0"]
