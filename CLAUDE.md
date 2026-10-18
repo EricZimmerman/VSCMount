@@ -10,6 +10,7 @@ VSCMount is a Windows-only command line tool (`net10.0`; the net4 build was drop
 - `VssParsing`: everything that doesn't need Windows, so it is tested on Linux CI. `ParseCimDateTime` (WMI `yyyyMMddHHmmss.ffffff+UUU`, the offset in minutes is used; 2026.5 dropped it and assumed local time), `GetShadowCopyNumber` (from `DeviceObject`), `IsShadowCopyTarget`, `GetLinkName`, `NormalizeDriveLetter` (`C`, `C:`, `C:\`, `C:/`; anything else is refused), `GetMountRoot`. None of them throw.
 - `MountRoot.Prepare`: creates `<mp>_<letter>`, or removes the `vss*` links an earlier run left in it. If the folder holds anything else (a file, a real folder, a link to something that isn't a shadow copy), it deletes nothing and fails. 2026.5 deleted everything in that folder recursively, then the folder itself.
 - `Helpers.GetVssInfoViaWmi`: WmiLight queries of `Win32_Volume` and `Win32_ShadowCopy`. A copy whose volume `Win32_Volume` doesn't list, or whose device name isn't `...HarddiskVolumeShadowCopyN`, is skipped with a warning (2026.5 threw and stopped). Volumes are matched by `Caption` (`C:\`); a volume mounted in a folder has no letter and is never matched (2026.5 matched it by the first character of its path).
+- WmiLight.Native.dll: Costura embeds WmiLight.dll, and .NET only finds the native dll by itself next to the exe (`publish -r win-x64`, which is what the release zip holds) or under `runtimes\win-<arch>\native` when `VSCMount.deps.json` is there. `Helpers`' static constructor sets a `DllImportResolver` that looks in both places, so any copy of the files works (without it, a build output without the deps.json failed with `DllNotFoundException`). WmiLight 7.2.0 and 7.3.0 behave the same here; the version was not the cause.
 - `Helpers.MountVss`: `CreateSymbolicLinkW` to `\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN\`. Its return type is `BOOLEAN`, so it is marshaled as `I1`; `SetLastError` gives the reason for a failure.
 
 ## Behavior to keep
@@ -37,6 +38,7 @@ To make a shadow copy for MountTests (elevated PowerShell): `Invoke-CimMethod -C
 - `ParsingTests`: WMI dates, device names, link targets, link names, drive letters, mount folder names, and random input.
 - `MountRootTests`: a real temp folder. Files, real `vss*` folders and `vss*` links to other places survive and make `Prepare` fail; links to shadow copy devices (dangling, made with `Directory.CreateSymbolicLink`) are removed. The link tests are ignored where links can't be created (Windows without administrator rights or Developer Mode).
 - `CliTests`: VSCMount.dll as a process: help without administrator rights, exit codes for missing or invalid arguments, and that nothing is created without administrator rights (skipped when elevated, since it would mount).
+- `WmiTests` (Windows only): `Win32_Volume` through WmiLight and the native dll resolver.
 - `MountTests` (`[Explicit]`, elevated Windows only): mounts the real shadow copies, checks names, targets and that the links show files; remounts; and checks a folder with other files is refused and kept.
 
 ## Versioning and release

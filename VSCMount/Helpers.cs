@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Serilog;
 using WmiLight;
@@ -39,6 +40,66 @@ public static class Helpers
 {
     private const uint SymbolicLinkFlagDirectory = 1;
 
+    private static IntPtr _wmiLightNative;
+
+    static Helpers()
+    {
+        //WmiLight.dll is embedded by Costura, so .NET only finds WmiLight.Native.dll by itself when the deps.json is
+        //there to point at runtimes\win-<arch>\native (a build) or the dll is next to the exe (publish -r win-x64).
+        //Look in both places so any copy of the files works, instead of failing with DllNotFoundException
+        NativeLibrary.SetDllImportResolver(typeof(WmiConnection).Assembly, ResolveWmiLightNative);
+    }
+
+    private static IntPtr ResolveWmiLightNative(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
+    {
+        if (!libraryName.StartsWith("WmiLight.Native", StringComparison.OrdinalIgnoreCase)) return IntPtr.Zero;
+
+        if (_wmiLightNative != IntPtr.Zero) return _wmiLightNative;
+
+        var arch = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(AppContext.BaseDirectory, "WmiLight.Native.dll"),
+                     Path.Combine(AppContext.BaseDirectory, "runtimes", $"win-{arch}", "native", "WmiLight.Native.dll")
+                 })
+        {
+            if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
+            {
+                Log.Verbose("Loaded {Native}", candidate);
+                _wmiLightNative = handle;
+                return handle;
+            }
+        }
+
+        //Let .NET look where it normally does
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    ///     Win32_Volume DeviceID to Caption (C:\ for a volume with a drive letter). Needs no administrator rights
+    /// </summary>
+    internal static Dictionary<string, string> GetVolumes()
+    {
+        using var con = new WmiConnection();
+        return GetVolumes(con);
+    }
+
+    private static Dictionary<string, string> GetVolumes(WmiConnection con)
+    {
+        var volumes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var vol in con.CreateQuery("SELECT Caption,DeviceID FROM Win32_Volume"))
+        {
+            var deviceId = vol["DeviceID"]?.ToString();
+            var caption = vol["Caption"]?.ToString();
+
+            if (deviceId != null && caption != null) volumes[deviceId] = caption;
+        }
+
+        return volumes;
+    }
+
     //CreateSymbolicLinkW returns BOOLEAN (1 byte), not BOOL, so the return value must be marshaled as I1
     [DllImport("kernel32.dll", EntryPoint = "CreateSymbolicLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.I1)]
@@ -53,17 +114,10 @@ public static class Helpers
         Log.Debug("Running WMI queries to get VSC info");
 
         var vss = new List<VssInfo>();
-        var volumes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         using var con = new WmiConnection();
 
-        foreach (var vol in con.CreateQuery("SELECT Caption,DeviceID FROM Win32_Volume"))
-        {
-            var deviceId = vol["DeviceID"]?.ToString();
-            var caption = vol["Caption"]?.ToString();
-
-            if (deviceId != null && caption != null) volumes[deviceId] = caption;
-        }
+        var volumes = GetVolumes(con);
 
         Log.Verbose("Volume info from WMI: {@Volumes}", volumes);
 
