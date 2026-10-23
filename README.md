@@ -8,7 +8,7 @@ copy, so you can browse it with Explorer or point other tools at it.
 | **Version** | 2026.10.0 |
 | **Download** | [.NET 10](https://download.ericzimmermanstools.com/net/VSCMount.zip) |
 | **All tools** | [ericzimmerman.github.io](https://ericzimmerman.github.io) or [Get-ZimmermanTools](https://download.ericzimmermanstools.com/Get-ZimmermanTools.zip), which downloads them all and keeps them current |
-| **Changes** | [ChangeLog.txt](https://download.ericzimmermanstools.com/ChangeLog.txt) |
+| **Changes** | [ChangeLog](https://ericzimmerman.github.io/changelog/) |
 | **Issues** | [EricZimmerman/VSCMount](https://github.com/EricZimmerman/VSCMount/issues) or [EricZimmerman/Issues](https://github.com/EricZimmerman/Issues/issues) |
 
 ## Requirements
@@ -74,7 +74,7 @@ copy of C:, such as `vss001-20261017T170000.1234560` (the number of the shadow c
 - No longer needs `WmiLight.Native.dll`, so it can't fail with "Unable to load DLL 'WmiLight.Native.dll'".
 - Exit code 1 when the tool fails (it was always 0). Error reports include source file and line numbers.
 
-The full list is in the [ChangeLog](https://download.ericzimmermanstools.com/ChangeLog.txt).
+The full list is in the [ChangeLog](https://ericzimmerman.github.io/changelog/).
 
 ## Building
 
